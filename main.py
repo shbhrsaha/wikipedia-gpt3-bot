@@ -156,13 +156,13 @@ def answer_question(question):
 
     summary_pretty = f"""
 
-    URL: {page.url}
+    Answer: {BOLD_SEQUENCE_START}{answer}{BOLD_SEQUENCE_END}
 
     Context:
 
     > [...] {context_highlighted}  [...]
 
-    Answer: {BOLD_SEQUENCE_START}{answer}{BOLD_SEQUENCE_END}
+    URL: {page.url}
 
     """
 
