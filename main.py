@@ -169,7 +169,7 @@ def answer_question(question):
     print(summary_pretty)
 
 
-class TurtleShell(cmd.Cmd):
+class WikiShell(cmd.Cmd):
     intro = '\nWelcome to Wikipedia GPT-3 Bot. Ask any question.\n'
     prompt = '(wikibot) '
 
@@ -179,4 +179,4 @@ class TurtleShell(cmd.Cmd):
 
 if __name__ == '__main__':
     ensure_env_vars()
-    TurtleShell().cmdloop()
+    WikiShell().cmdloop()
