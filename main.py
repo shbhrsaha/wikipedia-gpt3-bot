@@ -179,4 +179,8 @@ class WikiShell(cmd.Cmd):
 
 if __name__ == '__main__':
     ensure_env_vars()
-    WikiShell().cmdloop()
+
+    if len(sys.argv) > 1:
+        answer_question(sys.argv[1])
+    else:
+        WikiShell().cmdloop()
