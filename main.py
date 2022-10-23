@@ -1,12 +1,14 @@
 
 import sys
 import os
-import openai
 import wikipedia
 import re
-import cmd
+import aiohttp
+import asyncio
+from datetime import date
 
-OPEN_API_KEY_ENV_VAR = "OPENAI_API_KEY"
+OPENAI_API_KEY_ENV_VAR = "OPENAI_API_KEY"
+OPENAI_API_URL = "https://api.openai.com/v1/completions"
 
 MODEL = "text-davinci-002"
 TEMPERATURE = 0.7
@@ -20,35 +22,43 @@ CONTEXT_DIVIDER = " [...] "
 BOLD_SEQUENCE_START = "\033[1m"
 BOLD_SEQUENCE_END = "\033[0m"
 
+INTRO_MESSAGE = "\nWelcome to Wikipedia GPT-3 Bot. Ask any question.\n"
+REPL_PROMPT = "(wikibot) "
+
+DATE_TODAY = date.today().strftime("%B %d, %Y")
+
 
 def ensure_env_vars():
-    if OPEN_API_KEY_ENV_VAR not in os.environ:
-        print(f"{OPEN_API_KEY_ENV_VAR} not found in environment variables")
+    if OPENAI_API_KEY_ENV_VAR not in os.environ:
+        print(f"{OPENAI_API_KEY_ENV_VAR} not found in environment variables")
         sys.exit(1)
 
 
-def gen_completion(prompt):
-    response = openai.Completion.create(
-        model=MODEL,
-        prompt=prompt,
-        temperature=TEMPERATURE,
-        max_tokens=MAX_TOKENS,
-    )
+async def gen_completion(prompt):
+    params = {
+        "model": MODEL,
+        "prompt": prompt,
+        "temperature": TEMPERATURE,
+        "max_tokens": MAX_TOKENS,
+    }
+    headers = {"Authorization": f"Bearer {os.environ[OPENAI_API_KEY_ENV_VAR]}"}
 
-    return sanitize_response(response.choices[0].text)
+    async with aiohttp.ClientSession(headers=headers) as session:
+        async with session.post(OPENAI_API_URL, json=params) as resp:
+            return sanitize_response((await resp.json())["choices"][0]["text"])
 
 
 def sanitize_response(response):
     return response.strip().replace("\n", "").replace("\"", "")
 
 
-def question_to_page_search_query(question):
+async def question_to_page_search_query(question):
     prompt = f"""
 Which Wikipedia page would you search for to answer the following question: "{question}"
 
 Page name:"""
 
-    return gen_completion(prompt)
+    return await gen_completion(prompt)
 
 
 def page_search_query_to_page(page_search_query):
@@ -64,13 +74,13 @@ def page_search_query_to_page(page_search_query):
         return wikipedia.page(e.options[0], auto_suggest=False)
 
 
-def generate_ctrlf_term(page, question):
+async def generate_ctrlf_term(page, question):
     prompt = f"""
 Given the Wikipedia page for "{page.title}", what word would you search for on the page to answer the question "{question}"
 
 Search term:"""
 
-    return gen_completion(prompt)
+    return await gen_completion(prompt)
 
 
 def generate_context(page, ctrlf_term):
@@ -94,21 +104,21 @@ def generate_context(page, ctrlf_term):
                                  top_three_contexts))[:CONTEXT_CHAR_LIMIT]
 
 
-def generate_answer(context, question):
+async def generate_answer(context, question):
     prompt = f"""
 Background text: 
 
 "{context}"
 
-Answer the following question using only the background text above.
+Answer the following question using only the background text above. Today's date is {DATE_TODAY}.
 
 Question: "{question}"
 Answer:"""
 
-    return gen_completion(prompt)
+    return await gen_completion(prompt)
 
 
-def generate_excerpt(context, question):
+async def generate_excerpt(context, question):
     prompt = f"""
 Background text: 
 
@@ -118,7 +128,7 @@ Given the background text above, which substring would you highlight to answer t
 
 Excerpt:"""
 
-    excerpt = gen_completion(prompt)
+    excerpt = await gen_completion(prompt)
 
     if excerpt in context:
         return excerpt
@@ -139,18 +149,20 @@ def generate_context_highlighted(context, excerpt):
     return context_highlighted_abridged.replace("\n", " ")
 
 
-def answer_question(question):
-    page_search_query = question_to_page_search_query(question)
+async def answer_question(question):
+    page_search_query = await question_to_page_search_query(question)
 
     page = page_search_query_to_page(page_search_query)
     print(f"Pulling up page: {page.title}")
 
-    ctrlf_term = generate_ctrlf_term(page, question)
+    ctrlf_term = await generate_ctrlf_term(page, question)
 
     context = generate_context(page, ctrlf_term)
 
-    answer = generate_answer(context, question)
-    excerpt = generate_excerpt(context, question)
+    answer, excerpt = await asyncio.gather(
+        generate_answer(context, question),
+        generate_excerpt(context, question),
+    )
 
     context_highlighted = generate_context_highlighted(context, excerpt)
 
@@ -169,18 +181,16 @@ def answer_question(question):
     print(summary_pretty)
 
 
-class WikiShell(cmd.Cmd):
-    intro = '\nWelcome to Wikipedia GPT-3 Bot. Ask any question.\n'
-    prompt = '(wikibot) '
-
-    def default(self, line):
-        answer_question(line)
+async def main():
+    if len(sys.argv) > 1:
+        await answer_question(sys.argv[1])
+    else:
+        print(INTRO_MESSAGE)
+        while True:
+            question = input(REPL_PROMPT)
+            await answer_question(question)
 
 
 if __name__ == '__main__':
     ensure_env_vars()
-
-    if len(sys.argv) > 1:
-        answer_question(sys.argv[1])
-    else:
-        WikiShell().cmdloop()
+    asyncio.run(main())
